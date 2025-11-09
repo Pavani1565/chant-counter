@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chant Counter</title>
+  <style>
+    :root{ --bg:#0b1020; --card:#121935; --text:#e8ecff; }
+    *{box-sizing:border-box}
+    body{margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto; color:var(--text); background:var(--bg);}  
+    .container{max-width:900px;margin:0 auto;padding:20px}
+    .card{background:linear-gradient(180deg,#151d44,#0d1433);border:1px solid #2a3770;border-radius:18px;box-shadow:0 10px 30px #0006;padding:20px}
+    .screen{padding:20px}
+    .hidden{display:none}
+    .row{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap}
+    input[type=number]{padding:12px 14px;border-radius:12px;border:1px solid #2a3770;background:#0a1230;color:var(--text);font-size:22px;text-align:center;max-width:260px}
+    .btn{border:1px solid #3850a8;background:#122160;color:#fff;padding:12px 16px;border-radius:12px;cursor:pointer;font-weight:700}
+    .btn.big{font-size:22px;padding:18px 28px;border-radius:16px}
+    .btn.good{background:#1a3f2a;border-color:#2a8f57}
+    .centerCol{display:flex;flex-direction:column;align-items:center;gap:16px}
+    .bubble{width:min(60vmin,320px);height:min(60vmin,320px);border-radius:50%;display:flex;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 30% 20%,#3aa2ff33,transparent 60%), #0a1230;border:2px solid #2a3770;box-shadow:inset 0 0 40px #0006, 0 10px 30px #0004}
+    .bubble .num{font-size:clamp(36px,10vmin,72px);font-weight:900;letter-spacing:1px}
+    .stat{display:flex;flex-direction:column;gap:6px;background:#0b163e;border:1px solid #243a7f;padding:14px;border-radius:12px;min-width:120px;align-items:center}
+    .stat .k{font-size:12px;opacity:.8}
+    .stat .v{font-size:20px;font-weight:700}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Screen 1: Setup -->
+    <section id="screenSetup" class="screen">
+      <h1 style="text-align:center;margin:8px 0 18px 0">🌀 Chant Counter</h1>
+      <div class="card" style="max-width:560px;margin:0 auto">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+          <label for="setupTarget" style="font-size:14px;opacity:.85">How many chants?</label>
+          <input id="setupTarget" type="number" min="1" placeholder="e.g., 108" />
+          <button class="btn good" id="startBtn" onclick="__beginFromInput()">Start</button>
+          <div class="row">
+            <button class="btn" onclick="__beginPreset(27)">27</button>
+            <button class="btn" onclick="__beginPreset(54)">54</button>
+            <button class="btn" onclick="__beginPreset(108)">108</button>
+          </div>
+          <div style="font-size:12px;opacity:.8">Type a number and tap <b>Start</b>, or choose a preset.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Screen 2: Counting -->
+    <section id="screenCount" class="screen hidden">
+      <div class="card centerCol" style="max-width:620px;margin:0 auto">
+        <div class="bubble"><div class="num" id="bubbleCount">0</div></div>
+        <button class="btn big good" id="countBtn" onclick="__doCount()">Tap to Count (Space)</button>
+        <div style="font-size:12px;opacity:.85">Target: <span id="targetLabel">0</span> • Elapsed: <span id="elapsed">00:00</span></div>
+      </div>
+    </section>
+
+    <!-- Screen 3: Results -->
+    <section id="screenDone" class="screen hidden">
+      <div class="card" style="max-width:620px;margin:0 auto; text-align:center">
+        <h2 style="margin:6px 0 4px 0">Session Complete 🎉</h2>
+        <p style="opacity:.9;margin:0 0 12px 0">Target <span id="doneTarget">0</span> chants in <span id="doneTime">00:00</span></p>
+        <div class="row" style="justify-content:center;gap:12px;margin-top:8px">
+          <div class="stat"><div class="k">Average / chant</div><div class="v" id="statAvg">–</div></div>
+          <div class="stat"><div class="k">Chants per minute</div><div class="v" id="statCpm">–</div></div>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn good" id="newSessionBtn" onclick="__newSession()">New session</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+  // ===== Minimal, robust JS =====
+  var _sSetup, _sCount, _sDone,
+      _setupTarget, _countBtn, _bubbleCount, _elapsedEl,
+      _targetLabel, _doneTarget, _doneTime, _statAvg, _statCpm;
+
+  var _target=0, _count=0, _startTime=null, _endTime=null, _running=false, _timerId=null, _audioCtx=null;
+
+  function _q(id){ return document.getElementById(id); }
+  function _show(sec){ _sSetup.classList.add('hidden'); _sCount.classList.add('hidden'); _sDone.classList.add('hidden'); sec.classList.remove('hidden'); }
+
+  function _ensureAudio(){ if(!_audioCtx){ try{ _audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } return _audioCtx; }
+  function _beep(freq, ms, vol){
+    var ctx=_ensureAudio(); if(!ctx) return; if(ctx.state==='suspended'){ try{ ctx.resume(); }catch(e){} }
+    var o=ctx.createOscillator(); var g=ctx.createGain(); o.type='sine'; o.frequency.value=freq||880; g.gain.value=vol==null?0.15:vol; o.connect(g); g.connect(ctx.destination); o.start();
+    setTimeout(function(){ try{ g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.05); o.stop(ctx.currentTime+0.06);}catch(e){} }, ms||160);
+  }
+
+  function _tripleChime(){
+    var ctx=_ensureAudio(); if(ctx && ctx.state==='suspended'){ try{ ctx.resume(); }catch(e){} }
+    var tones = [880, 1040, 1240];
+    var i = 0;
+    function playNext(){
+      if (i >= tones.length) return;
+      _beep(tones[i], 180, 0.18);
+      i++;
+      setTimeout(playNext, 300);
+    }
+    playNext();
+  }
+
+  function _fmt(ms){ var s=Math.floor(ms/1000), m=Math.floor(s/60), rs=s%60, hh=Math.floor(m/60), mm=m%60; return (hh>0? String(hh).padStart(2,'0')+':':'')+String(mm).padStart(2,'0')+':'+String(rs).padStart(2,'0'); }
+
+  function __beginSession(n){
+    n=Number(n); if(!n||n<1) return;
+    _target=Math.floor(n); _count=0; _startTime=null; _endTime=null; _running=false;
+    _bubbleCount.textContent='0'; _elapsedEl.textContent='00:00';
+    _targetLabel.textContent=String(_target);
+    _show(_sCount);
+    __start();
+  }
+
+  function __start(){
+    if(_running) return; _running=true;
+    if(!_startTime) _startTime=Date.now();
+    if(_timerId) clearInterval(_timerId);
+    _timerId=setInterval(function(){
+      if(_running) _elapsedEl.textContent=_fmt(Date.now()-_startTime);
+    }, 250);
+  }
+
+  function __pause(){ _running=false; if(_timerId){ clearInterval(_timerId); _timerId=null; } }
+  function __complete(){ __pause(); _endTime=Date.now(); _tripleChime(); _showResults(); }
+
+  function __doCount(){
+    if(!_running) __start();
+    _count++; _bubbleCount.textContent=String(_count);
+    if(_count>=_target){ __complete(); }
+  }
+
+  function _showResults(){
+    var total=(_endTime||Date.now())-(_startTime||Date.now());
+    var avg= total/Math.max(1,_target);
+    var perMin=_target/(total/60000);
+    _doneTarget.textContent=String(_target);
+    _doneTime.textContent=_fmt(total);
+    _statAvg.textContent= avg<1000? (avg|0)+' ms' : (Math.round(avg/100)/10)+' s';
+    _statCpm.textContent= perMin.toFixed(1);
+    _show(_sDone);
+  }
+
+  function __beginFromInput(){ var v=_setupTarget.value.trim(); __beginSession(v); }
+  function __beginPreset(n){ __beginSession(n); }
+  function __newSession(){ _show(_sSetup); setTimeout(function(){ _setupTarget.focus(); }, 30); }
+
+  // Keyboard
+  function _onKey(e){
+    if(!_sCount.classList.contains('hidden')){
+      if(e.code==='Space' || e.key==='Enter'){ e.preventDefault(); __doCount(); }
+    } else if(!_sSetup.classList.contains('hidden')){
+      if(e.key==='Enter'){ e.preventDefault(); __beginFromInput(); }
+    }
+  }
+
+  // Init
+  document.addEventListener('DOMContentLoaded', function(){
+    _sSetup=_q('screenSetup'); _sCount=_q('screenCount'); _sDone=_q('screenDone');
+    _setupTarget=_q('setupTarget'); _countBtn=_q('countBtn');
+    _bubbleCount=_q('bubbleCount'); _elapsedEl=_q('elapsed'); _targetLabel=_q('targetLabel');
+    _doneTarget=_q('doneTarget'); _doneTime=_q('doneTime'); _statAvg=_q('statAvg'); _statCpm=_q('statCpm');
+
+    window.addEventListener('keydown', _onKey);
+
+    window.addEventListener('pointerdown', function(){
+      var ctx=_ensureAudio();
+      if(ctx && ctx.state==='suspended'){ try{ ctx.resume(); }catch(e){} }
+    }, {once:true});
+
+    _show(_sSetup);
+    setTimeout(function(){ _setupTarget.focus(); }, 40);
+  });
+  </script>
+</body>
+</html>
+
+
+
+
